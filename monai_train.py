@@ -7,11 +7,13 @@ from scipy import ndimage
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import monai
+
+import models.unet
 from dataloader_deprecated import Split_Data, CustomImageDataset
 from monai.data import ImageDataset
 from monai.transforms import AddChannel, Compose, RandRotate90, Resize, ScaleIntensity, EnsureType
 import matplotlib.pyplot as plt
-import models.c3d
+from models import inception_v1, c3d, resnext, voxnet, unet
 
 os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
@@ -23,28 +25,36 @@ train_data, train_label, valid_data, valid_label = Split_Data(train_txt_path, va
 print(train_data[:10], train_label[:10])
 
 # loading data
-train_loader = DataLoader(CustomImageDataset(train_data, train_label, in_channels=3,reshape_size=(64,112,112)), batch_size=2, shuffle=True)
-val_loader = DataLoader(CustomImageDataset(valid_data, valid_label, in_channels=3,reshape_size=(64,112,112)), batch_size=2, shuffle=False)
+train_loader = DataLoader(CustomImageDataset(train_data, train_label, in_channels=1,reshape_size=(64,64,64)), batch_size=2, shuffle=True)
+val_loader = DataLoader(CustomImageDataset(valid_data, valid_label, in_channels=1,reshape_size=(64,64,64)), batch_size=2, shuffle=False)
 
 # device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# model
+'''
+loading model
+'''
+
+# ------------------------------monai------------------------------
 # model = monai.networks.nets.DenseNet121(spatial_dims=3, in_channels=1, out_channels=2).to(device)
 # model = monai.networks.nets.resnet18(spatial_dims=3, n_input_channels=1, num_classes=2).to(device)
-
-# Unet
 # model = monai.networks.nets.unet(spatial_dims=3, in_channels=1, out_channels=1, channels=(8, 16, 32, 64), strides=(2, 2,2)).to(device)
-
-
-# ViT
 # model = monai.networks.nets.ViT(in_channels=1, img_size=(64,64,64), patch_size=(16,16,16), pos_embed='conv',classification=True,num_classes=2)
 # model = model.cuda()
 
-# self-designed models
-model = models.c3d.get_model(sample_size=112, sample_duration=64, num_classes=2)
+# -----------------------Efficient-3DCNNs models--------------------------
+# -----> https://github.com/okankop/Efficient-3DCNNs/tree/master/models
+# model = models.c3d.get_model(sample_size=112, sample_duration=64, num_classes=2)  # input_shape = (batch_size, 3, n*16, 112, 112)
+# model = models.resnext.resnext50(sample_size=112, sample_duration=64, num_classes=2)  # input_shape = (batch_size, 3, n*16, 112, 112)
+
+# -----------------------------others------------------------------------
+model = models.voxnet.VoxNet(input_shape=(64, 64, 64))  # input_shape = (batch_size, 1, 32, 32, 32)
+# model = models.unet.Unet()  # input_shape = (batch_size, 1, 64, 64, 64)
+# model = inception_v1.InceptionI3d(num_classes=2, in_channels=3)
 model = model.cuda()
+
+# ----------------------------designed by wyc----------------------------
 
 
 # parameter
@@ -71,7 +81,7 @@ for epoch in range(epochs):
         # one_hot = torch.zeros(np.array(batch_size, num_class, device=torch.device('cuda:0')).scatter_(1, label, 1)
         labels = labels.to(torch.int64)
         # outputs = torch.tensor([item.cpu().detach().numpy() for item in outputs]).cuda()
-
+        # print(outputs.size())
 
         loss = loss_function(outputs, labels)
         loss.backward()
@@ -100,7 +110,7 @@ for epoch in range(epochs):
             if metric > best_metric:
                 best_metric = metric
                 best_metric_epoch = epoch + 1
-                torch.save(model.state_dict(), "best_metric_model_classification3d_array.pth")
+                torch.save(model.state_dict(), "runs/May20_17-09-50_unet/best_metric_model_classification3d_array.pth")
                 print("saved new best metric model")
             print(
                 "current epoch: {} current accuracy: {:.4f} best accuracy: {:.4f} at epoch {}".format(
